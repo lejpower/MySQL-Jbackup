@@ -1,0 +1,1138 @@
+#!/bin/bash
+#--------------------------------------------------------------------------------
+#          install/uninstall a jbackup client module
+#--------------------------------------------------------------------------------
+main()
+{
+  my_ver="0.1.3"
+
+  init $@ ;
+  case $? in
+    0) ;;
+    9) put_msg I06  # check exec user
+       exit 1;;
+    *) exit 1;;
+  esac
+
+  case $EXE_MODE in
+
+    "check")
+    # ------------------------------
+
+      chk_install_all
+
+    ;;
+
+    "uninstall")
+    # ------------------------------
+
+      put_msg I05 ${EXE_MODE}
+
+      # check the single execution
+      chk_dupli_exec
+      if [ $? -ne 0 ]; then
+        put_msg W03
+        exit 1
+      fi
+
+      # check the no process of jbackup
+      if [ `chk_rbkup_proc 0` -ne 0 ]; then
+        put_msg W02 `chk_rbkup_proc 1`;
+        exit 2;
+      fi
+
+      # get the version of jbackup-cli now installed
+      bef_cl_ver=`get_client_ver`;
+      case $? in
+        1) put_msg E06 $bef_cl_ver;
+           exit 1;;
+      esac
+
+      if [ "${bef_cl_ver}" = "" -a "${f_force}" != "1" ]; then
+        put_msg L01
+        exit 1;
+      fi
+
+      chk_jbackupd_sts
+      if [ $? -eq 0 ]; then
+        /etc/init.d/jbackupd stop
+      fi
+
+      rm_flg=0
+
+      # uninstall jbackupd
+      if [ -d /var/lib/jbackup -o -e /etc/init.d/jbackupd ]; then
+        rm_flg=1
+      fi
+      \rm -rf /var/lib/jbackup
+      \rm -f  /etc/init.d/jbackupd
+
+      if [ -d /var/lib/jbackup ]; then
+        echo " can not remove /var/lib/jbackup 
+        rm_flg=9
+      fi
+      if [ -e /etc/init.d/jbackupd ]; then
+        echo " can not remove /etc/init.d/jbackupd
+        rm_flg=9
+      fi
+      if [ $rm_flg -eq 1 ]; then
+        echo "jbackupd uninstalled"
+      fi
+
+      # uninstall /etc/logrotate.d/jbackup
+      if [ -e /etc/logrotate.d/jbackup ]; then
+        \rm -f  /etc/logrotate.d/jbackup
+      fi
+      if [ -e /etc/logrotate.d/jbackup ]; then
+        echo " can not remove /etc/logrotate.d/jbackup"
+      else
+        echo " /etc/logrotate.d/jbackup has removed."
+      fi
+
+      # uninstall jbackup_installer
+      \rm -f  /usr/bin/jbackup_installer
+      if [ -e /usr/bin/jbackup_installer ]; then
+        echo " can not remove /usr/bin/jbackup_installer"
+      fi
+
+      # uninstall jbackup-cli
+      ret=`chk_install_bypip jbackup-cli`
+      if [ $? -eq 0 ]; then
+        exec_uninstall;
+        case $? in
+          0) put_msg I02;;
+          *) put_msg E07
+             exit 1;;
+        esac
+      else
+        echo "$ret"
+      fi
+
+      # uninstall check for jbackup-cli
+      aft_cl_ver=`get_client_ver`;
+      case $? in
+        9) put_msg C01;;
+        *) put_msg E08 $aft_cl_ver;
+           exit 1;;
+      esac
+
+    ;;
+
+    ""|"install")
+    # ------------------------------
+
+      echo ""
+      echo "== installation =="
+
+      # check installation git
+      chk_git
+      if [ $? -ne 0 ]; then
+        echo " Error Installation git"
+        exit 1;
+      fi
+
+      # install python if it isn't exist
+      printf " - "
+      python -V
+      if [ $? -gt 0 ]; then
+        echo "### install python ###"
+        install_python
+        if [ $? -ne 0 ]; then
+          echo " Error Installation python"
+          exit 1;
+        fi
+      fi
+
+      # install pip if it isn't exist
+      printf " - "
+      pip -V
+      if [ $? -gt 0 ]; then
+        echo "### install pip ###"
+        install_pip
+        if [ $? -ne 0 ]; then
+          echo " Error Installation pip"
+          exit 1;
+        fi
+      fi
+
+      # install xtrabackup if it isn't exist
+      printf " - "
+      xtrabackup --version
+      if [ $? -gt 0 ]; then
+        echo "### install pip ###"
+        install_xtrabackup
+        if [ $? -ne 0 ]; then
+          echo " Error Installation xtrabackup"
+          exit 1;
+        fi
+      fi
+
+      # install mysql-connector-python if it isn't exist
+      ret=`chk_install_bypip mysql-connector-python`
+      if [ $? -eq 0 ]; then
+        printf " - $ret \n"
+      else
+        install_mysql_con_python
+        if [ $? -ne 0 ]; then
+          echo " Error Installation mysql-connector-python"
+          exit 1;
+        fi
+      fi
+
+      # install ConfigParser if it isn't exist
+      ret=`chk_install_bypip ConfigParser`
+      if [ $? -eq 0 ]; then
+        printf " - $ret \n"
+      else
+        install_configparser
+        if [ $? -ne 0 ]; then
+          echo " Error Installation ConfigParser"
+          exit 1;
+        fi
+      fi
+
+      # install jbackup-cli if it isn't exist
+      printf " - "
+      chk_cl_ver=`get_client_ver`;
+      if [ $? -eq 0 ]; then
+        echo "jbackup $chk_cl_ver"
+      else
+        get_user_to_access_git;
+        exec_install
+        ret=`chk_install_bypip jbackup-cli`
+        if [ $? -ne 0 ]; then
+          echo " Error Installation jbackup"
+          exit 1;
+        fi
+      fi
+
+      # set logrotate
+      if [ ! -d /etc/logrotate.d ]; then
+        echo "/etc/logrotate.d is not exist."
+        echo "need to install logrotate"
+        exit 1;
+      fi
+      set_logrotate
+      printf " - "
+      if [ $? -eq 0 ]; then
+        echo "/etc/logrotate.d/jbackup is set."
+      else
+        echo " Error Installation /etc/roglotate.d/jbackup"
+        exit 1;
+      fi
+
+      # install jbackupd if it isn't exist
+      printf " - "
+      ret=`chk_jbackupd_sts`
+      sts=$?
+      if [ $sts -eq 2 -o ! -x /var/lib/jbackup/jbackupd_exe ]; then
+        if [ "$con_user" = "" ]; then
+          get_user_to_access_git;
+        fi
+        install_jbackupd
+        if [ $? -ne 0 ]; then
+          echo " Error Installation jbackupd"
+          exit 1;
+        fi
+        ret=`chk_jbackupd_sts`
+        if [ $? -eq 1 ]; then
+          printf "If you want to start jbackup daemon, then \`/etc/init.d/jbackupd start\`\n"
+        fi
+      elif [ $sts -eq 1 ]; then
+        printf "$ret. If you want to start jbackup daemon, then \`/etc/init.d/jbackupd start\`\n"
+      else
+        echo $ret
+      fi
+
+      # check jbackup.cnf
+      if [ ! -e /usr/local/mysql/.cnf/.jbackup.cnf ]; then
+        make_jbackup_cnf
+        printf " - /usr/local/mysql/.cnf/.jbackup.cnf is created.\n"
+      fi
+
+      echo "== end =="
+      echo ""
+
+      chk_install_all
+    ;;
+
+    "update")
+    # ------------------------------
+
+      put_msg I05 ${EXE_MODE}
+
+      chk_dupli_exec
+      if [ $? -ne 0 ]; then
+        put_msg W03
+        exit 1
+      fi
+
+      if [ `chk_rbkup_proc 0` -ne 0 ]; then
+        put_msg W02 `chk_rbkup_proc 1`;
+        exit 2;
+      fi
+
+      bef_cl_ver=`get_client_ver`;
+      case $? in
+        1) put_msg E06 $bef_cl_ver;
+           exit 1;;
+      esac
+
+      get_user_to_access_git;
+
+      RBKUP_VER=`get_rbkup_github_ver`;
+      if [ $? -ne 0 ]; then
+        put_msg E09
+        exit 1;
+      fi
+
+      chk_rbkup_ver ${RBKUP_VER};
+      case $? in
+        1) put_msg E10
+           exit 1;;
+        2) put_msg E11 $RBKUP_VER
+           exit 1;;
+      esac
+
+      if [ "${f_force}" != "1" ]; then
+        chk_diff_ver ${RBKUP_VER} ${bef_cl_ver};
+        case $? in
+          0) put_msg L02 "${RBKUP_VER} = ${bef_cl_ver}";
+             exit 0;;
+          1) put_msg I03 "${RBKUP_VER} > ${bef_cl_ver}";;
+          2) put_msg W01 "${bef_cl_ver} > ${RBKUP_VER}";
+             exit 2;;
+          3) put_msg I03 "${RBKUP_VER} > NONE";;
+        esac
+      fi
+ 
+      exec_uninstall;
+      exec_install;
+      case $? in
+        0) put_msg I04;;
+        *) put_msg E12
+           exit 1;;
+      esac
+
+      aft_cl_ver=`get_client_ver`;
+      case $? in
+        1) put_msg E06 $aft_cl_ver;
+           exit 1;
+      esac
+
+      if [ ${f_force} = "" ]; then
+        chk_diff_ver ${RBKUP_VER} ${aft_cl_ver};
+        case $? in
+          1) put_msg E13 "${RBKUP_VER} > ${bef_cl_ver}";
+             exit 1;;
+          2) put_msg E14 "${aft_cl_ver} > ${RBKUP_VER}";
+             exit 1;;
+          3) put_msg E15;
+             exit 1;;
+          *) put_msg C02 ${aft_cl_ver};;
+        esac
+      fi
+
+      chk_install_all
+
+    ;;
+  esac
+  
+  # register jbackup_installer to /usr/bin
+  if [ "$EXE_MODE" = "install" -o "$EXE_MODE" = "" ]; then
+    if [ ! -e "$BIN_DIR/$SCRIPT_NAME" -o "$SCRIPT_NAME" = sh ]; then
+      chmod 755 ./jbackup_installer
+      \mv -f ./jbackup_installer /usr/bin/.
+    elif [ "$BIN_DIR" = "/tmp" ]; then
+      chmod 755 /tmp/jbackup_installer
+      \mv -f /tmp/jbackup_installer /usr/bin/.
+    elif [ "$BIN_DIR/$SCRIPT_NAME" != "/usr/bin/jbackup_installer" ]; then
+      \cp -pf "$BIN_DIR/$SCRIPT_NAME" /usr/bin/.
+    fi
+  fi
+
+  exit 0;
+
+}
+
+#----------------------------------------
+# Initial processing
+#----------------------------------------
+init()
+{
+
+  PATH=/bin:/usr/local/bin:/usr/bin:/usr/sbin:$PATH; export PATH ;
+  . /etc/bashrc
+
+  # are there agurments? 
+  cd `dirname $0`
+  CUR_DIR=`find $PWD -name jbackup_installer`
+  if [ "$CUR_DIR" != "/tmp/jbackup_installer" -a $# -eq 0 ]; then
+    call_usage
+    return 9
+  fi
+ 
+  set_proxy;
+
+  SCRIPT_NAME=`echo $0 | awk -F"/" '{ print $NF}'`;
+  BIN_DIR=`echo $0 | sed 's/'${SCRIPT_NAME}'//g' | sed 's/\/$//g'`
+  if [ ${BIN_DIR:-"."} = "." -o ${BIN_DIR:-"."} = "./" ]; then
+      BIN_DIR=`pwd`
+  fi
+
+  hst_nm=`uname -n`;
+
+  # check the user of execution
+  usr_nm=` /usr/bin/id | awk '{print $1}' | awk -F\( '{print $2}' | sed 's/)$//g'`;
+  if [ ${usr_nm} != "root" ]; then
+    return 9
+  fi
+
+  # Check the number of arguments
+  if [ $# -lt 4 ]; then
+    EXE_MODE=$1
+    EXE_OPT=$2
+    EXE_TAG=$3
+  else
+    call_usage ;
+    return 1
+  fi
+
+  # Check the value of arguments
+  case $EXE_MODE in
+    "install"|"uninstall"|"update"|"check"|"") ;;
+    "-h") call_usage ;
+          return 1;;
+    "-v"|"-V"|"-version") echo $my_ver ;
+          return 1;;
+    *) call_usage ;
+       return 1;;
+  esac
+  if [ "${EXE_OPT}" != "" ]; then
+    get_opt "${EXE_OPT}" ;
+    if [ $? -ne 0 ]; then
+      call_usage ;
+      return 1 ;
+    fi
+    if [ "$EXE_TAG" = "" -a "$f_force" = "" ]; then
+      call_usage ;
+      return 1 ;
+    fi
+  fi
+
+  return 0
+}
+
+#----------------------------------------
+# check execution in duplicate
+#----------------------------------------
+chk_dupli_exec()
+{
+  wk1=`ps -f  | awk ' $8 ~ /sh/ && $0 ~ /$SCRIPT_NAME/ {print $3}' | wc -l`
+  wk2=`ps -ef | awk ' $8 ~ /sh/ && $0 ~ /$SCRIPT_NAME/ {print $3}' | wc -l`
+  if [ `expr $wk2 - $wk1` -gt 0 ]; then
+    return 1;
+  fi
+
+  return 0
+}
+
+#----------------------------------------
+# check command
+#----------------------------------------
+chk_cmd()
+{
+  w_cmd=$1
+  $w_cmd > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    printf " - [NG] "
+    ret=1
+  else
+    printf " - [OK] "
+    ret=0
+  fi
+  $w_cmd
+}
+
+#----------------------------------------
+# installation check
+#----------------------------------------
+chk_install_all()
+{
+  instl_f=0
+
+  echo ""
+  echo "== installation check =="
+
+  # check python
+  chk_cmd "python -V"
+  if [ $? -ne 0 ]; then 
+    instl_f=1;
+  fi
+
+  # check pip
+  chk_cmd "pip -V"
+  if [ $? -ne 0 ]; then 
+    instl_f=1;
+  fi
+
+  # check xtrabackup
+  chk_cmd "xtrabackup --version"
+  if [ $? -ne 0 ]; then 
+    instl_f=1;
+  fi
+
+  # check mysql-connector-python
+  ret=`chk_install_bypip mysql-connector-python`
+  if [ $? -eq 0 ]; then
+    printf " - [OK] $ret \n"
+  else
+    printf " - [NG] mysql-connector-python : NOT INSTALLED\n"
+    instl_f=1;
+  fi
+
+  # check ConfigParser
+  ret=`chk_install_bypip ConfigParser`
+  if [ $? -eq 0 ]; then
+    printf " - [OK] $ret \n"
+  else
+    printf " - [NG] ConfigParser : NOT INSTALLED\n"
+    instl_f=1;
+  fi
+
+  # check jbackup-cli
+  printf " - "
+  chk_cl_ver=`get_client_ver`;
+  if [ $? -eq 0 ]; then
+    echo "[OK] jbackup $chk_cl_ver"
+  else
+    echo "[NG] jbackup : NOT INSTALLED (or can't get the version)"
+    instl_f=1;
+  fi
+
+  # check logrotate setting
+  printf " - "
+  if [ -e /etc/logrotate.d/jbackup ]; then
+    echo "[OK] /etc/logrotate.d/jbackup is set."
+  else
+    echo "[NG] /etc/logrotate.d/jbackup is not set."
+    instl_f=1;
+  fi
+
+  # check jbackupd
+  printf " - "
+  ret=`chk_jbackupd_sts`
+  sts=$?
+  if [ $sts -eq 1 -a $instl_f -eq 0 ]; then
+    printf "[OK] $ret. If you want to start jbackup daemon, then \`/etc/init.d/jbackupd start\`\n"
+  elif [ $sts -eq 9 ]; then
+    echo "[NG] $ret"
+  else
+    echo "[OK] $ret"
+  fi
+
+  # check jbackup.cnf
+  if [ ! -e /usr/local/mysql/.cnf/.jbackup.cnf ]; then
+    printf " - [NG] /usr/local/mysql/.cnf/.jbackup.cnf not found\n"
+  fi
+  if [ `grep "##PSWD##" /usr/local/mysql/.cnf/.jbackup.cnf | wc -l` -ne 0 ]; then
+    printf " - [NG] You need to set password at /usr/local/mysql/.cnf/.jbackup.cnf .\n"
+  fi
+
+  echo "== end =="
+  echo ""
+
+}
+
+#----------------------------------------
+# make jbackup.cnf
+#----------------------------------------
+make_jbackup_cnf()
+{
+  host_nm=`uname -n`
+  mk_file="/usr/local/mysql/.cnf/.jbackup.cnf"
+
+    cat <<+ > ${mk_file}
+[manageDB]
+hostname = ${host_nm}
+port = 3306
+user = jbackup
+password = ##PSWD##
+[clientDB]
+hostname = 127.0.0.1
+port = 3306
+user = root
+password = ##PSWD##
++
+
+}
+
+#----------------------------------------
+# check version of jbackup on gitHub
+#----------------------------------------
+chk_rbkup_ver()
+{
+  w_ver=$1
+  if [ ! -n "$w_ver" ]; then
+    return 1
+  fi
+
+  wkv_1=`echo $w_ver | sed 's/[0-9]\.[0-9]/99/1'`
+  wkv_2=`echo $wkv_1 | sed 's/[0-9]\.[0-9]/99/1'`
+  `expr $wkv_2 + 1 >/dev/null 2>&1`
+  if [ $? -ge 2 -o `expr ${#w_ver} - 2` -ne ${#wkv_2} ]; then
+    return 2
+  fi
+
+  return 0
+}
+
+#----------------------------------------
+# check installation git
+#----------------------------------------
+chk_git()
+{
+  which git > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    yum -y install git
+    which git > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+#----------------------------------------
+# get version of client for each server
+#----------------------------------------
+get_client_ver()
+{
+  which jbackup > /dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    cl_ver=`jbackup -v`
+    if [ $? -ne 0 ]; then
+      echo $cl_ver
+      return 9
+    fi
+  else
+    echo " jbackup not found"
+    return 9
+  fi
+
+  if [ ! -n "$cl_ver" ]; then
+    echo ""
+    return 2
+  fi
+
+  wkcl_1=`echo $cl_ver | sed 's/[0-9]\.[0-9]/99/1'`
+  wkcl_2=`echo $wkcl_1 | sed 's/[0-9]\.[0-9]/99/1'`
+  `expr $wkcl_2 + 1 >/dev/null 2>&1`
+  if [ $? -ge 2 -o `expr ${#cl_ver} - 2` -ne ${#wkcl_2} ]; then
+    echo $cl_ver
+    return 1
+  fi
+
+  echo $cl_ver
+  return 0
+}
+
+#----------------------------------------
+# Install
+#----------------------------------------
+exec_install()
+{
+
+  if [ "$EXE_TAG" != "" ]; then
+    pip install git+https://"${con_user}":"${con_pswd}"@${GIT_URL}@${EXE_TAG} | \
+        sed 's/https:\/\/.*git\.###/https:\/\/git\.###/g'
+  else
+    pip install git+https://"${con_user}":"${con_pswd}"@${GIT_URL} | \
+        sed 's/https:\/\/.*git\.###/https:\/\/git\.###/g'
+  fi
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+#----------------------------------------
+# Uninstall
+#----------------------------------------
+exec_uninstall()
+{
+  pip uninstall --yes jbackup-cli
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+#----------------------------------------
+# check difference jbackup version
+#----------------------------------------
+chk_diff_ver()
+{
+  v_github=$1
+  v_client=$2
+
+  if [ "$v_github" = "$v_client" ]; then
+    return 0
+  fi
+
+  if [ ! -n "$v_client" ]; then
+    return 3
+  fi
+
+  w_gh=`echo $v_github | cut -d"." -f 1`
+  w_cl=`echo $v_client | cut -d"." -f 1`
+  if [ $w_gh -gt $w_cl ]; then
+    return 1
+  elif [ $w_gh -lt $w_cl ]; then
+    return 2
+  fi
+
+  w_gh=`echo $v_github | cut -d"." -f 2`
+  w_cl=`echo $v_client | cut -d"." -f 2`
+  if [ $w_gh -gt $w_cl ]; then
+    return 1
+  elif [ $w_gh -lt $w_cl ]; then
+    return 2
+  fi
+
+  w_gh=`echo $v_github | cut -d"." -f 3`
+  w_cl=`echo $v_client | cut -d"." -f 3`
+  if [ $w_gh -gt $w_cl ]; then
+    return 1
+  elif [ $w_gh -lt $w_cl ]; then
+    return 2
+  fi
+
+  # -eq
+  return 0
+}
+
+#----------------------------------------
+# get jbackup version of GitHub
+#----------------------------------------
+get_rbkup_github_ver()
+{
+  w_ver=`git ls-remote -t \
+         https://"${con_user}":"${con_pswd}"@${GIT_URL}`
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+  v_rbup=`echo "${w_ver}" | awk 'END {print $2}' | sed 's/.*tags\/v//' | sed 's/\^{}//'`
+  echo $v_rbup
+  return 0
+}
+
+#----------------------------------------
+# check installation by using pip
+#----------------------------------------
+chk_install_bypip()
+{
+  ret=`pip show $1 | grep "^Version"`
+  if [ "$ret" = "" ]; then
+    echo " $1 not found"
+    return 1
+  fi
+  echo "$1 $ret"
+  return 0
+}
+
+#----------------------------------------
+#   chk_jbackup_process
+#----------------------------------------
+chk_rbkup_proc()
+{
+  w_flg=$1
+  if [ $w_flg -ne 1 ]; then
+    ps -ef | awk ' $8 ~ /python/ && $0 ~ /jbackup/ {print $9}' | wc -l
+  else
+    ps -ef | awk '$8 ~ /python/ && $0 ~ /jbackup/ {for(i=9;i<NF;i++){printf $i" "} print $NF}'
+  fi
+}
+
+#----------------------------------------
+# get user and password to login GitHub
+#----------------------------------------
+get_user_to_access_git()
+{
+  echo "input your GitHub account"
+  stty echo
+  printf "  Username for '${GIT_URL}': "
+  read con_user
+  stty -echo
+  printf "  Password for 'https://"${con_user}"@${GIT_URL}':"
+  read con_pswd
+  stty echo
+  echo ""
+
+  return 0
+}
+
+#----------------------------------------
+# install python
+#----------------------------------------
+install_python()
+{
+  mkdir -vp /usr/local/src;
+  cd /usr/local/src;
+  PY_VER="2.7.7"
+  yum -y install openssl-devel
+  wget --no-check-certificate https://www.python.org/ftp/python/${PY_VER}/Python-${PY_VER}.tgz;
+  tar -xvf Python-${PY_VER}.tgz;
+  cd Python-${PY_VER};
+  ./configure --prefix=/usr/local/Python-${PY_VER};
+  make;
+  make install;
+  ln -s /usr/local/Python-${PY_VER}/bin/python /usr/local/bin/python;
+  echo "export PATH=/usr/local/bin:/usr/local/Python-${PY_VER}/bin:\$PATH" >> /etc/bashrc
+
+  python -V
+  if [ $? -gt 0 ]; then
+    return 1;
+  fi
+  return 0;
+}
+
+#----------------------------------------
+# install pip
+#----------------------------------------
+install_pip()
+{
+  mkdir -vp /usr/local/src;
+  cd /usr/local/src;
+  wget https://bootstrap.pypa.io/get-pip.py --no-check-certificate
+  python get-pip.py
+
+  pip install -U pip
+
+  pip -V
+  if [ $? -gt 0 ]; then
+    return 1;
+  fi
+  return 0;
+}
+
+#----------------------------------------
+# install xtrabackup
+#----------------------------------------
+install_xtrabackup()
+{
+  mkdir -vp /usr/local/src;
+  cd /usr/local/src;
+
+  /bin/cp -p /etc/yum.repos.d/epel.repo /etc/yum.repos.d/epel.repo.bak
+
+  sed -i -e 's/#baseurl/baseurl/g' /etc/yum.repos.d/epel.repo
+  sed -i -e 's/^mirrorlist/#mirrorlist/g' /etc/yum.repos.d/epel.repo
+
+  yum install -y numactl*.x86_64
+  yum install -y epel-release
+  yum install —y enablerepo=epel libev
+
+  wget --no-check-certificate http://www.percona.com/downloads/percona-release/redhat/0.1-4/percona-release-0.1-4.noarch.rpm;
+  rpm -Uhv percona-release-0.1-4.noarch.rpm
+  yum install -y percona-xtrabackup-24 qpress
+
+  /bin/cp -p /etc/yum.repos.d/epel.repo.bak /etc/yum.repos.d/epel.repo
+
+  xtrabackup --version
+  if [ $? -gt 0 ]; then
+    return 1;
+  fi
+  return 0;
+}
+
+#----------------------------------------
+# install mysql-connector-python
+#----------------------------------------
+install_mysql_con_python()
+{
+  mkdir -vp /usr/local/src;
+  cd /usr/local/src;
+  set_proxy;
+
+  pip install ${URL}/mysql-connector-python-2.0.4.zip
+
+  #pip install https://s3-ap-northeast-1.amazonaws.com/juni/mysql-connector-python-2.0.4.zip
+  #git clone https://github.com/mysql/mysql-connector-python.git
+  #cd mysql-connector-python
+  #python ./setup.py build
+  #python ./setup.py install
+
+  ret=`chk_install_bypip mysql-connector-python`
+  if [ $? -ne 0 ]; then
+    return 1;
+  fi
+  return 0;
+}
+
+#----------------------------------------
+# install ConfigParser
+#----------------------------------------
+install_configparser()
+{
+  mkdir -vp /usr/local/src;
+  cd /usr/local/src;
+  set_proxy;
+
+  pip install configparser-3.5.0.tar.gz
+
+  ret=`chk_install_bypip ConfigParser`
+  if [ $? -ne 0 ]; then
+    return 1;
+  fi
+  return 0;
+}
+
+#----------------------------------------
+# install jbackup_daemon
+#----------------------------------------
+install_jbackupd()
+{
+  mkdir -vp /usr/local/src;
+  cd /usr/local/src;
+
+  if [ -d /usr/local/src/jbackup_daemon ]; then
+    \rm -rf /usr/local/src/jbackup_daemon
+  fi
+  git clone https://"${con_user}":"${con_pswd}"@${GIT_URL}
+
+  cp -p /usr/local/src/jbackup_daemon/jbackupd /etc/init.d/.
+
+  mkdir -vp /var/lib/jbackup
+  cp -p /usr/local/src/jbackup_daemon/jbackupd_exe /var/lib/jbackup/.
+
+  /etc/init.d/jbackupd status
+  if [ $? -ne 0 ]; then
+    return 1;
+  fi
+  return 0;
+}
+
+#----------------------------------------
+# check jbackupd status
+#----------------------------------------
+chk_jbackupd_sts()
+{
+
+  if [ -x /etc/init.d/jbackupd ]; then
+    ret=`/etc/init.d/jbackupd status`
+    sts=`echo $ret | awk '{print $NF}'`
+    echo $ret
+  else
+    echo "/etc/init.d/jbackupd not found"
+    return 9
+  fi
+  
+  if [ `echo $sts | grep running` ]; then
+    #running
+    return 0
+  elif [ `echo $sts | grep stopped` ]; then
+    #stopped
+    return 1
+  else
+    #none or error
+    return 9
+  fi
+
+}
+
+#----------------------------------------
+# set logrotate.d/jbackup
+#----------------------------------------
+set_logrotate()
+{
+
+  set_file=/etc/logrotate.d/jbackup
+
+  if [ ! -e $set_file ]; then
+    cat <<+ > ${set_file}
+/usr/local/mysql/backup/NFS/check_*.log {
+  daily
+  missingok
+  rotate 2
+  notifempty
+  nocreate
+  nocompress
+  postrotate
+    if [ \`ls -l /usr/local/mysql/backup/NFS/backup_*log  2> /dev/null | wc -l\` -gt 0 ]; then
+      find /usr/local/mysql/backup/NFS/backup_*log  -mtime +31 -exec rm -f {} \;
+    fi
+    if [ \`ls -l /usr/local/mysql/backup/NFS/binary_*log  2> /dev/null | wc -l\` -gt 0 ]; then
+      find /usr/local/mysql/backup/NFS/binary_*log  -mtime +31 -exec rm -f {} \;
+    fi
+    if [ \`ls -l /usr/local/mysql/backup/NFS/remove_*log  2> /dev/null | wc -l\` -gt 0 ]; then
+      find /usr/local/mysql/backup/NFS/remove_*log  -mtime +31 -exec rm -f {} \;
+    fi
+    if [ \`ls -l /usr/local/mysql/backup/NFS/restore_*log 2> /dev/null | wc -l\` -gt 0 ]; then
+      find /usr/local/mysql/backup/NFS/restore_*log -mtime +31 -exec rm -f {} \;
+    fi
+  endscript
+}
++
+  fi
+
+  if [ ! -e $set_file ]; then
+    return 1;
+  fi
+
+  return 0;
+
+}
+
+#----------------------------------------
+# set Proxy
+#----------------------------------------
+set_proxy()
+{
+  export http_proxy=###
+  export https_proxy=###
+}
+
+#----------------------------------------
+# get options
+#----------------------------------------
+get_opt()
+{
+  GET_OP=$1
+
+  OPTIND=1
+  while getopts hfv OPTION
+  do
+  case ${OPTION} in
+    h)  call_usage
+        exit 1;;
+    f)  continue;;
+    v)  continue;;
+    *)  return 1;;
+    esac
+  done
+
+  OPTIND=1
+  while getopts hfv OPTION
+  do
+  case ${OPTION} in
+    h)  continue;;
+    f)  f_force=1;;
+    v)  continue;;
+    *)  return 1;;
+    esac
+  done
+
+  OPTIND=1
+  while getopts hfv OPTION
+  do
+  case ${OPTION} in
+    h)  continue;;
+    f)  continue;;
+    v)  echo $my_ver 
+        exit 1;;
+    *)  return 1;;
+    esac
+  done
+
+  return 0
+}
+
+#----------------------------------------
+# function of putting messages
+#----------------------------------------
+put_msg()
+{
+  log_n=$1
+  info=$2
+
+  case $1 in
+    "E01") msg="This script is allowed execution only by the root user.";;
+    "E02") msg="unknown pip
+           Please check [which pip] at the server";;
+    "E03") msg="error argument number.";;
+    "E04") msg="error the first argument value. - ${info}";;
+    "E05") msg="error the second argument value. - ${info}";;
+    "E06") msg="cannot get jbackup ver on client - ${info}
+           Please check [jbackup -v] at the server";;
+    "E07") msg="failed uninstall";;
+    "E08") msg="Although the client was uninstalled, the version was gotten. - ${info}";;
+    "E09") msg="Failed during getting version of jbackup from GitHub";;
+    "E10") msg="cannot get jbackup ver on github - ${info}";;
+    "E11") msg="getting jbackup ver on github - ${info}";;
+    "E12") msg="failed install";;
+    "E13") msg="Client version is lower than GitHub version. ${info}";;
+    "E14") msg="Client version became higher than GitHub version. ${info}";;
+    "E15") msg="can not get the client jbackup version after INSTALL. [jbackup -v]";;
+    "I01") msg="[${hst_nm}] - Client version of jbackup is ${info}";;
+    "I02") msg="UNINSTALLED";;
+    "I03") msg="go to INSTALL";;
+    "I04") msg="INSTALLED";;
+    "I05") msg="START ${info}";;
+    "I06") msg="This script is allowed execution only by the root user.";;
+    "L01") msg="This client is not installed jbackup in spite of trying to uninstall.";;
+    "L02") msg="This client version is latest. - ${info}";;
+    "W01") msg="Client version higher than GitHub version. ${info}";;
+    "W02") msg="Avoid install for during execution of jbackup. - ${info}";;
+    "W03") msg="Process of jbackup_cli_install.sh was exists";;
+    "C01") msg="uninstall NORMAL END";;
+    "C02") msg="Installed version is ${info}";;
+  esac
+
+  msg_flg=`echo $log_n | sed 's/[0-9]//g'`
+    
+  echo ""
+  case $msg_flg in
+  "I") # Info
+    echo "";
+    date "+ %Y/%m/%d %H:%M:%S - ${msg}";;
+  "L")
+    echo "    $msg";
+    date "+ %Y/%m/%d %H:%M:%S - [${hst_nm}] ${EXE_MODE} Needless.";;
+  "C")
+    echo "  $msg";
+    date "+ %Y/%m/%d %H:%M:%S - [${hst_nm}] ${EXE_MODE} Completed.";;
+  "E")
+    echo "    Error:  $msg";
+    date "+ %Y/%m/%d %H:%M:%S - [${hst_nm}] ${log_n} ${EXE_MODE} ERROR Occurred.";;
+  "W")
+    echo "    Warning: $msg";
+    date "+ %Y/%m/%d %H:%M:%S - [${hst_nm}] ${log_n} ${EXE_MODE} WARNING Occurred.";;
+  esac
+  echo ""
+
+  return ;
+}
+
+#----------------------------------------
+# usage
+#----------------------------------------
+call_usage()
+{
+  echo `basename $0`
+  echo "";
+  echo "[usage]";
+  echo "   `basename $0` EXE_MODE";
+  echo "   `basename $0` EXE_MODE -[exe_option]";
+  echo "   `basename $0` -[option]";
+  echo "";
+  echo "   EXE_MODE  : install / uninstall / update / check / (none)";
+  echo "     install   - install jbackup client.";
+  echo "     uninstall - uninstall jbackup client.";
+  echo "     update    - update jbackup-cli.";
+  echo "     check     - check the installation.";
+  echo "     (none)    - install jbackup client.";
+  echo "";
+  echo "  -[exe_option]";
+  echo "     f  : force execution ";
+  echo "          execute install/uninstall/update even if during execution of jbackup ";
+  echo "          execute update even if jbackup-cli was latest version";
+  echo "  -[option]";
+  echo "     v  : print my version ";
+  echo "     h  : help ";
+  echo "";
+}
+
+#--------------------------------------------------------------------------------
+main $*;

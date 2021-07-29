@@ -1,0 +1,12 @@
+*.pyc
+setup.pyc
+jbackup/*.pyc
+jbackup/lib/*.pyc
+jbackup/lib/alert/*.pyc
+jbackup/lib/chk/*.pyc
+jbackup/lib/con/*.pyc
+jbackup/lib/etc/*.pyc
+jbackup/lib/log/*.pyc
+jbackup/lib/run/*.pyc
+jbackup_cli.egg-info
+

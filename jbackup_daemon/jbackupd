@@ -1,0 +1,115 @@
+#!/bin/bash
+#
+# jbackupd          Start/Stop the jbackup daemon.
+#
+# processname: jbackup
+# config: none
+# pidfile: /var/run/jbackupd.pid
+# Source function library.
+. /etc/init.d/functions
+. /etc/bashrc
+export PATH=$PATH:/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/mysql/backup
+
+# See how we were called.
+
+daemon_name=jbackup
+prog=jbackupd_exe
+PIDFILE=${PIDFILE-/var/run/${daemon_name}.pid}
+LOCKFILE=/var/lock/subsys/${daemon_name}
+
+if [ -n "${PIDFILE}" ]; then
+    PIDFILE_DIR=$(dirname ${PIDFILE})
+    if [ ! -e $PIDFILE_DIR ]; then
+        mkdir -p $PIDFILE_DIR
+    fi
+fi
+
+do_start() {
+
+    daemon_dir=`pip show jbackup-cli | grep Location | head -1 | awk '{ print $2 }'`
+    exec_cmd=/var/lib/jbackup/jbackupd_exe
+    if [ -x "${daemon_path}" ]; then
+      echo " Error : ${daemon_path} is not found."
+      exit 1;
+    fi
+    exe_path=`which jbackup | awk '{ print $1 }'`
+    if [ "`echo $exe_path | grep jbackup`" == "" ]; then
+      echo " Error : jbackup is not found."
+      exit 1;
+    fi
+    echo -n ”Starting $prog: ”
+    if [ -e ${LOCKFILE} ]; then
+        if [ -e ${PIDFILE} ] && [ -e /proc/`cat ${PIDFILE}` ]; then
+            echo -n ”cannot start $prog: $prog is already running.”;
+            failure ”cannot start $prog: $prog already running.”;
+            echo
+            return 1
+        fi
+    fi
+    daemon --pidfile=$PIDFILE --user=mysql ${exec_cmd} 
+    RETVAL=$?
+    echo
+    ps -e | grep ${prog} | grep -v grep | awk '{ print $1 }' | tail -1 > $PIDFILE
+    [ $RETVAL -eq 0 ] && touch ${LOCKFILE};
+    return $RETVAL
+}
+
+do_stop() {
+   echo -n ”Stopping $prog: ”
+   if [ ! -e ${LOCKFILE} ]; then
+      echo  "============"
+      echo  ”cannot stop $prog: $prog is not running.”
+      failure ”cannot stop $prog: $prog is not running.”
+      echo
+      return 1;
+   fi
+   KILL_ID=`cat ${PIDFILE}`
+   killproc -p ${PIDFILE} 
+   RETVAL=$?
+   echo
+   [ $RETVAL -eq 0 ] && rm -f ${LOCKFILE};
+   return $RETVAL
+}
+
+rhstatus() {
+    status $prog
+}
+
+do_restart() {
+    $0 stop
+    $0 start
+}
+
+do_reload() {
+    echo -n ”Reloading $prog daemon configuration: ”
+    killproc $prog -HUP
+    RETVAL=$?
+    echo
+    return $RETVAL
+}
+
+
+case "$1" in
+    start)
+        do_start
+        ;;
+    stop)
+        do_stop
+        ;;
+    restart)
+        do_restart
+        ;;
+    reload)
+        do_reload
+        ;;
+    status)
+        # `status` is a function defined in RedHat's `/etc/init.d/functions` and it doesn't work well with `set -e`
+        rhstatus
+        ;;
+    *)
+        echo "Usage: $prog {start|stop|reload|restart|status}"
+        exit 1
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+. /etc/bashrc
+export PATH=$PATH:/sbin:/usr/sbin:/bin:/usr/bin
+
+SLEEP_SEC=60
+jbackup=jbackup
+
+{
+while [ true ]
+do
+    ${jbackup} check > /dev/null 2>&1 < /dev/null &
+    sleep $SLEEP_SEC
+done
+}&
