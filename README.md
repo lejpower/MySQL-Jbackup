@@ -1,6 +1,6 @@
 ## MySQL-Jbackup
 ```
-easy management for MySQL backup.
+Easy management for MySQL backup.
 it is the wrapper of the Xtrabackup.
 ```
 
